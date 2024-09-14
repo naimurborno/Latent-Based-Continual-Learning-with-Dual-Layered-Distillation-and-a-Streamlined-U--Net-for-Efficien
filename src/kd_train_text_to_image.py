@@ -16,7 +16,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-
+# device
 import argparse
 import logging
 import math
@@ -40,6 +40,11 @@ from packaging import version
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
+import os
+from pathlib import Path
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
 
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
@@ -63,6 +68,189 @@ except:
 check_min_version("0.15.0")
 
 logger = get_logger(__name__, log_level="INFO")
+flowers = {
+    "1": "pink primrose",
+    "2": "hard-leaved pocket orchid",
+    "3": "canterbury bells",
+    "4": "sweet pea",
+    "5": "english marigold",
+    "6": "tiger lily",
+    "7": "moon orchid",
+    "8": "bird of paradise",
+    "9": "monkshood",
+    "10": "globe thistle",
+    "11": "snapdragon",
+    "12": "colt's foot",
+    "13": "king protea",
+    "14": "spear thistle",
+    "15": "yellow iris",
+    "16": "globe-flower",
+    "17": "purple coneflower",
+    "18": "peruvian lily",
+    "19": "balloon flower",
+    "20": "giant white arum lily",
+    "21": "fire lily",
+    "22": "pincushion flower",
+    "23": "fritillary",
+    "24": "red ginger",
+    "25": "grape hyacinth",
+    "26": "corn poppy",
+    "27": "prince of wales feathers",
+    "28": "stemless gentian",
+    "29": "artichoke",
+    "30": "sweet william",
+    "31": "carnation",
+    "32": "garden phlox",
+    "33": "love in the mist",
+    "34": "mexican aster",
+    "35": "alpine sea holly",
+    "36": "ruby-lipped cattleya",
+    "37": "cape flower",
+    "38": "great masterwort",
+    "39": "siam tulip",
+    "40": "lenten rose",
+    "41": "barbeton daisy",
+    "42": "daffodil",
+    "43": "sword lily",
+    "44": "poinsettia",
+    "45": "bolero deep blue",
+    "46": "wallflower",
+    "47": "marigold",
+    "48": "buttercup",
+    "49": "oxeye daisy",
+    "50": "common dandelion",
+    "51": "petunia",
+    "52": "wild pansy",
+    "53": "primula",
+    "54": "sunflower",
+    "55": "pelargonium",
+    "56": "bishop of llandaff",
+    "57": "gaura",
+    "58": "geranium",
+    "59": "orange dahlia",
+    "60": "pink-yellow dahlia",
+    "61": "cautleya spicata",
+    "62": "japanese anemone",
+    "63": "black-eyed susan",
+    "64": "silverbush",
+    "65": "californian poppy",
+    "66": "osteospermum",
+    "67": "spring crocus",
+    "68": "bearded iris",
+    "69": "windflower",
+    "70": "tree poppy",
+    "71": "gazania",
+    "72": "azalea",
+    "73": "water lily",
+    "74": "rose",
+    "75": "thorn apple",
+    "76": "morning glory",
+    "77": "passion flower",
+    "78": "lotus lotus",
+    "79": "toad lily",
+    "80": "anthurium",
+    "81": "frangipani",
+    "82": "clematis",
+    "83": "hibiscus",
+    "84": "columbine",
+    "85": "desert-rose",
+    "86": "tree mallow",
+    "87": "magnolia",
+    "88": "cyclamen",
+    "89": "watercress",
+    "90": "canna lily",
+    "91": "hippeastrum",
+    "92": "bee balm",
+    "93": "ball moss",
+    "94": "foxglove",
+    "95": "bougainvillea",
+    "96": "camellia",
+    "97": "mallow",
+    "98": "mexican petunia",
+    "99": "bromelia",
+    "100": "blanket flower",
+    "101": "trumpet creeper",
+    "102": "blackberry lily"
+}
+class DreamBoothDataset(Dataset):
+    def __init__(
+        self,
+        # instance_data_root,
+        # instance_prompt,
+        tokenizer,
+        # class_data_root=None,
+        # class_prompt=None,
+        size=512,
+        center_crop=False,
+    ):
+        self.size = size
+        self.center_crop = center_crop
+        self.tokenizer = tokenizer
+
+        # Define the root directory and sub-directory paths
+        self.root_dir = Path('/content/BK-SDM/oxford-102-flower-dataset/102 flower/flowers/train')
+        if not self.root_dir.exists():
+            raise ValueError("Root directory doesn't exist.")
+
+        self.image_paths = []
+        self.prompts = []
+
+        # Iterate through each class folder to collect image paths and corresponding prompts
+        for class_folder in self.root_dir.iterdir():
+            if class_folder.is_dir():
+                class_name = class_folder.name
+                for image_file in class_folder.glob('*.jpg'):  # Adjust the extension as necessary
+                    self.image_paths.append(image_file)
+                    self.prompts.append(f"a photo of a <{flowers[class_name]}>")
+
+        self.num_images = len(self.image_paths)
+
+        self.image_transforms = transforms.Compose(
+            [
+                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
+    def __len__(self):
+        return self.num_images
+
+    def __getitem__(self, index):
+        example = {}
+
+        # Load image
+        image_path = self.image_paths[index]
+        image = Image.open(image_path)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        prompt = self.prompts[index]
+
+        example['instance_images'] = self.image_transforms(image)
+        example['instance_prompt_ids'] = self.tokenizer(
+            prompt,
+            padding='do_not_pad',
+            truncation=True,
+            max_length=self.tokenizer.model_max_length
+        ).input_ids
+
+        return example
+
+class PromptDataset(Dataset):
+    def __init__(self, prompt, num_samples):
+        self.prompt = prompt
+        self.num_samples = num_samples
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, index):
+        example = {}
+        example["prompt"] = self.prompt
+        example["index"] = index
+        return example
 
 def get_activation(mem, name):
     def get_output_hook(module, input, output):
@@ -383,9 +571,10 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        logging_dir=logging_dir,
+        # logging_dir=logging_dir,
         project_config=accelerator_project_config,
     )
+    accelerator.device='cuda'
 
     # Add custom csv logger and validation image folder
     val_img_dir = os.path.join(args.output_dir, 'val_img')
@@ -542,69 +731,92 @@ def main():
     # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
     print("*** load dataset: start")
     t0 = time.time()
-    dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train")
+    train_dataset = DreamBoothDataset(
+        # instance_data_root=args.instance_data_dir,
+        # instance_prompt=args.instance_prompt,
+        # class_data_root=args.class_data_dir if args.with_prior_preservation else None,
+        # class_prompt=args.class_prompt,
+        tokenizer=tokenizer,
+        size=args.resolution,
+        center_crop=args.center_crop,
+    )
     print(f"*** load dataset: end --- {time.time()-t0} sec")
 
     # Preprocessing the datasets.
-    column_names = dataset.column_names
-    image_column = column_names[0]
-    caption_column = column_names[1]
+    # column_names = dataset.column_names
+    # image_column = column_names[0]
+    # caption_column = column_names[1]
 
     # Preprocessing the datasets.
     # We need to tokenize input captions and transform the images.
-    def tokenize_captions(examples, is_train=True):
-        captions = []
-        for caption in examples[caption_column]:
-            if isinstance(caption, str):
-                captions.append(caption)
-            elif isinstance(caption, (list, np.ndarray)):
-                # take a random caption if there are multiple
-                captions.append(random.choice(caption) if is_train else caption[0])
-            else:
-                raise ValueError(
-                    f"Caption column `{caption_column}` should contain either strings or lists of strings."
-                )
-        inputs = tokenizer(
-            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
-        )
-        return inputs.input_ids
+    # def tokenize_captions(examples, is_train=True):
+    #     captions = []
+    #     for caption in examples[caption_column]:
+    #         if isinstance(caption, str):
+    #             captions.append(caption)
+    #         elif isinstance(caption, (list, np.ndarray)):
+    #             # take a random caption if there are multiple
+    #             captions.append(random.choice(caption) if is_train else caption[0])
+    #         else:
+    #             raise ValueError(
+    #                 f"Caption column `{caption_column}` should contain either strings or lists of strings."
+    #             )
+    #     inputs = tokenizer(
+    #         captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+    #     )
+    #     return inputs.input_ids
 
     # Preprocessing the datasets.
-    train_transforms = transforms.Compose(
-        [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
-            transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ]
-    )
+    # train_transforms = transforms.Compose(
+    #     [
+    #         transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+    #         transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
+    #         transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize([0.5], [0.5]),
+    #     ]
+    # )
 
-    def preprocess_train(examples):
-        images = [image.convert("RGB") for image in examples[image_column]]
-        examples["pixel_values"] = [train_transforms(image) for image in images]
-        examples["input_ids"] = tokenize_captions(examples)
-        return examples
+    # def preprocess_train(examples):
+    #     images = [image.convert("RGB") for image in examples[image_column]]
+    #     examples["pixel_values"] = [train_transforms(image) for image in images]
+    #     examples["input_ids"] = tokenize_captions(examples)
+    #     return examples
 
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset = dataset.shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
-        train_dataset = dataset.with_transform(preprocess_train)
+        # train_dataset = dataset.with_transform(preprocess_train)
 
     def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
+        input_ids = [example["instance_prompt_ids"] for example in examples]
+        pixel_values = [example["instance_images"] for example in examples]
+
+        # concat class and instance examples for prior preservation
+        # if args.with_prior_preservation:
+        #     input_ids += [example["class_prompt_ids"] for example in examples]
+        #     pixel_values += [example["class_images"] for example in examples]
+
+        pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
-        return {"pixel_values": pixel_values, "input_ids": input_ids}
+
+        input_ids = tokenizer.pad(
+            {"input_ids": input_ids},
+            padding="max_length",
+            return_tensors="pt",
+            max_length=tokenizer.model_max_length
+        ).input_ids
+
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+        }
+        return batch
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        shuffle=True,
-        collate_fn=collate_fn,
-        batch_size=args.train_batch_size,
-        num_workers=args.dataloader_num_workers,
+        train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn
     )
 
     # Scheduler and math around the number of training steps.
@@ -651,8 +863,8 @@ def main():
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if accelerator.is_main_process:
-        accelerator.init_trackers("text2image-fine-tune", config=vars(args))
+    # if accelerator.is_main_process:
+    #     accelerator.init_trackers("text2image-fine-tune", config=vars(args))
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
