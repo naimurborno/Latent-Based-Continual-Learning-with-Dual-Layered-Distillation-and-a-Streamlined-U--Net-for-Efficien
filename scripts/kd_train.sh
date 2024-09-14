@@ -16,7 +16,7 @@ GRAD_ACCUMULATION=4
 StartTime=$(date +%s)
 
 CUDA_VISIBLE_DEVICES=1 accelerate launch src/kd_train_text_to_image.py \
-  --pretrained_model_name_or_path $MODEL_NAME \
+  --pretrained_model_name_or_path "CompVis/stable-diffusion-v1-4" \
   --train_data_dir $TRAIN_DATA_DIR\
   --use_ema \
   --resolution 512 --center_crop --random_flip \
