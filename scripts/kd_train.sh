@@ -10,12 +10,12 @@ UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_small" # option: ["bk_base", "bk_small", "bk_tiny"]
 OUTPUT_DIR="./results/kd_"$UNET_NAME # please adjust it if needed
 
-BATCH_SIZE=64
+BATCH_SIZE=1
 GRAD_ACCUMULATION=4
 
 StartTime=$(date +%s)
 
-CUDA_VISIBLE_DEVICES=1 accelerate launch src/kd_train_text_to_image.py \
+CUDA_VISIBLE_DEVICES=0 accelerate launch src/kd_train_text_to_image.py \
   --pretrained_model_name_or_path "CompVis/stable-diffusion-v1-4" \
   --train_data_dir $TRAIN_DATA_DIR\
   --use_ema \
@@ -27,7 +27,7 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch src/kd_train_text_to_image.py \
   --max_grad_norm 1 \
   --lr_scheduler="constant" --lr_warmup_steps=0 \
   --report_to="all" \
-  --max_train_steps=400000 \
+  --max_train_steps=40\
   --seed 1234 \
   --gradient_accumulation_steps $GRAD_ACCUMULATION \
   --checkpointing_steps 5000 \
