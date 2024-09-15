@@ -188,7 +188,7 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
 
         # Define the root directory and sub-directory paths
-        self.root_dir = Path('/content/bksd/oxford-102-flower-dataset/102 flower/flowers/train')
+        self.root_dir = Path('/kaggle/input/pytorch-challange-flower-dataset/dataset/train')
         if not self.root_dir.exists():
             raise ValueError("Root directory doesn't exist.")
 
