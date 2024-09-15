@@ -188,7 +188,7 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
 
         # Define the root directory and sub-directory paths
-        self.root_dir = Path('/content/BK-SDM/oxford-102-flower-dataset/102 flower/flowers/train')
+        self.root_dir = Path('/content/bksd/oxford-102-flower-dataset/102 flower/flowers/train')
         if not self.root_dir.exists():
             raise ValueError("Root directory doesn't exist.")
 
@@ -479,7 +479,7 @@ def parse_args():
     parser.add_argument(
         "--mixed_precision",
         type=str,
-        default=None,
+        default="fp16",
         choices=["no", "fp16", "bf16"],
         help=(
             "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
@@ -574,7 +574,7 @@ def main():
         # logging_dir=logging_dir,
         project_config=accelerator_project_config,
     )
-    accelerator.device='cuda'
+    # accelerator.device='cuda'
 
     # Add custom csv logger and validation image folder
     val_img_dir = os.path.join(args.output_dir, 'val_img')
@@ -1067,38 +1067,38 @@ def main():
             progress_bar.set_postfix(**logs)
 
             # save validation images
-            if (args.valid_prompt is not None) and (step % args.valid_steps == 0) and accelerator.is_main_process:
-                logger.info(
-                    f"Running validation... \n Generating {args.num_valid_images} images with prompt:"
-                    f" {args.valid_prompt}."
-                )
+            # if (args.valid_prompt is not None) and (step % args.valid_steps == 0) and accelerator.is_main_process:
+            #     logger.info(
+            #         f"Running validation... \n Generating {args.num_valid_images} images with prompt:"
+            #         f" {args.valid_prompt}."
+            #     )
                 # create pipeline
-                pipeline = StableDiffusionPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path,
-                    safety_checker=None,
-                    revision=args.revision,
-                )
-                pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=True)
-                generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                # pipeline = StableDiffusionPipeline.from_pretrained(
+                #     args.pretrained_model_name_or_path,
+                #     safety_checker=None,
+                #     revision=args.revision,
+                # )
+                # pipeline = pipeline.to(accelerator.device)
+                # pipeline.set_progress_bar_config(disable=True)
+                # generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-                if not os.path.exists(os.path.join(val_img_dir, "teacher_0.png")):
-                    for kk in range(args.num_valid_images):
-                        image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
-                        tmp_name = os.path.join(val_img_dir, f"teacher_{kk}.png")
-                        image.save(tmp_name)
+                # if not os.path.exists(os.path.join(val_img_dir, "teacher_0.png")):
+                #     for kk in range(args.num_valid_images):
+                #         image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
+                #         tmp_name = os.path.join(val_img_dir, f"teacher_{kk}.png")
+                #         image.save(tmp_name)
 
                 # set `keep_fp32_wrapper` to True because we do not want to remove
                 # mixed precision hooks while we are still training
-                pipeline.unet = accelerator.unwrap_model(unet, keep_fp32_wrapper=True).to(accelerator.device)
+                # pipeline.unet = accelerator.unwrap_model(unet, keep_fp32_wrapper=True).to(accelerator.device)
               
-                for kk in range(args.num_valid_images):
-                    image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
-                    tmp_name = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_{kk}.png")
-                    print(tmp_name)
-                    image.save(tmp_name)
+                # # for kk in range(args.num_valid_images):
+                # #     image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
+                # #     tmp_name = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_{kk}.png")
+                # #     print(tmp_name)
+                # #     image.save(tmp_name)
 
-                del pipeline
+                # del pipeline
                 torch.cuda.empty_cache()
 
             if global_step >= args.max_train_steps:
