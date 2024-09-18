@@ -68,6 +68,19 @@ except:
 check_min_version("0.15.0")
 
 logger = get_logger(__name__, log_level="INFO")
+#distillation loss function
+#Run this
+def distillation_loss(student_logits, teacher_logits, true_labels, T, alpha):
+    # Soft target
+  soft_targets = F.softmax(teacher_logits / T, dim=1)
+  student_softmax = F.log_softmax(student_logits / T, dim=1)
+  distillation_loss = F.kl_div(student_softmax, soft_targets, reduction='batchmean') * (T * T)
+
+    # Hard targets
+  hard_loss = F.cross_entropy(student_logits, true_labels)
+
+    # Combined loss
+  return alpha * distillation_loss + (1 - alpha) * hard_loss
 flowers = {
     "1": "pink primrose",
     "2": "hard-leaved pocket orchid",
@@ -188,7 +201,7 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
 
         # Define the root directory and sub-directory paths
-        self.root_dir = Path('/kaggle/input/pytorch-challange-flower-dataset/dataset/train')
+        self.root_dir = Path('/content/bksd/oxford-102-flower-dataset/102 flower/flowers/train')
         if not self.root_dir.exists():
             raise ValueError("Root directory doesn't exist.")
 
@@ -443,7 +456,7 @@ def parse_args():
             " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
         ),
     )
-    parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
+    parser.add_argument("--use_ema", action="store_false", help="Whether to use EMA model.")
     parser.add_argument(
         "--non_ema_revision",
         type=str,
@@ -630,7 +643,7 @@ def main():
     )
 
     config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config(config_student, revision=args.non_ema_revision)
+    unet = UNet2DConditionModel.from_config('borno1/bksdm-epoch-28000', subfolder='unet')
 
     # Copy weights from teacher to student
     if args.use_copy_weight_from_teacher:
@@ -934,6 +947,8 @@ def main():
 
     # get wandb_tracker (if it exists)
     wandb_tracker = accelerator.get_tracker("wandb")
+    T = 2.0  # Temperature
+    alpha = 1  # Weight for distillation loss
 
     for epoch in range(first_epoch, args.num_train_epochs):
 
@@ -1000,7 +1015,9 @@ def main():
                 loss_kd_feat = sum(losses_kd_feat)
 
                 # Compute the final loss
-                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+                loss_stu=distillation_loss(model_pred.float(),model_pred_teacher.float(),target.float(),T,alpha)
+                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu
+                
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
@@ -1099,7 +1116,7 @@ def main():
                 # #     image.save(tmp_name)
 
                 # del pipeline
-                torch.cuda.empty_cache()
+                #torch.cuda.empty_cache()
 
             if global_step >= args.max_train_steps:
                 break
