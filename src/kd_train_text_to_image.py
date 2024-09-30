@@ -201,7 +201,7 @@ class DreamBoothDataset(Dataset):
         self.tokenizer = tokenizer
 
         # Define the root directory and sub-directory paths
-        self.root_dir = Path('/content/bksd/oxford-102-flower-dataset/102 flower/flowers/train')
+        self.root_dir = Path('/content/WSDD-Weight-Shared-Distilled-Diffusion-/oxford-102-flower-dataset/102 flower/flowers/train')
         if not self.root_dir.exists():
             raise ValueError("Root directory doesn't exist.")
 
@@ -250,6 +250,46 @@ class DreamBoothDataset(Dataset):
         ).input_ids
 
         return example
+class EWC:
+    def __init__(self, model, dataloader, importance=1000):
+        self.model = model
+        self.importance = importance
+        self.params = {n: p for n, p in model.named_parameters() if p.requires_grad}
+        self.means = {}
+        self.fisher = {}
+
+        # Compute Fisher Information Matrix and weight means
+        self._compute_fisher_and_means(dataloader)
+
+    def _compute_fisher_and_means(self, dataloader):
+        self.model.eval()
+        for n, p in self.params.items():
+            self.means[n] = p.clone().detach()
+
+        fisher_matrix = {n: torch.zeros_like(p) for n, p in self.params.items()}
+        for batch in dataloader:
+            inputs, latents = self.prepare_inputs(batch)
+            outputs = self.model(latents)
+            loss = outputs.mean()  # Example loss calculation, modify as needed
+            self.model.zero_grad()
+            loss.backward()
+            for n, p in fisher_matrix.items():
+                fisher_matrix[n] += (self.params[n].grad ** 2) / len(dataloader)
+        for n, p in fisher_matrix.items():
+            self.fisher[n] = p.clone().detach()
+
+    def penalty(self, model):
+        loss = 0
+        for n, p in model.named_parameters():
+            if n in self.fisher:
+                loss += (self.fisher[n] * (p - self.means[n]).pow(2)).sum()
+        return self.importance * loss
+
+    def prepare_inputs(self, batch):
+        # Custom method to extract and prepare inputs (images, captions, latents, etc.)
+        inputs = batch['pixel_values']  # Modify according to actual batch structure
+        latents = batch['pixel_values']
+        return inputs, latents
 
 class PromptDataset(Dataset):
     def __init__(self, prompt, num_samples):
@@ -642,8 +682,8 @@ def main():
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
     )
 
-    config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config('borno1/bksdm-epoch-28000', subfolder='unet')
+    # config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
+    unet = UNet2DConditionModel.from_config('/content/WSDD-Weight-Shared-Distilled-Diffusion-/src/unet_config/bk_tiny/bk_small')
 
     # Copy weights from teacher to student
     if args.use_copy_weight_from_teacher:
@@ -654,6 +694,7 @@ def main():
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet_teacher.requires_grad_(False)
+    
 
     # Create EMA for the unet.
     if args.use_ema:
@@ -831,7 +872,7 @@ def main():
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn
     )
-
+    
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -850,10 +891,10 @@ def main():
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
-
+    ewc = EWC(unet, train_dataloader, importance=1000)
     if args.use_ema:
         ema_unet.to(accelerator.device)
-
+    
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -1000,7 +1041,7 @@ def main():
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
                 loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
-
+                ews_loss= ewc.penalty(unet)
                 # Predict feature-KD loss
                 losses_kd_feat = []
                 for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
@@ -1016,7 +1057,7 @@ def main():
 
                 # Compute the final loss
                 loss_stu=distillation_loss(model_pred.float(),model_pred_teacher.float(),target.float(),T,alpha)
-                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu
+                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu+ews_loss
                 
 
                 # Gather the losses across all processes for logging (if we use distributed training).
