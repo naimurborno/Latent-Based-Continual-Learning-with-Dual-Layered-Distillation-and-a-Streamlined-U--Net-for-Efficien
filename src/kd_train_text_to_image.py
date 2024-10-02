@@ -194,6 +194,7 @@ class DreamBoothDataset(Dataset):
         # class_data_root=None,
         # class_prompt=None,
         size=512,
+        replay_memory=None,
         center_crop=False,
     ):
         self.size = size
@@ -217,6 +218,7 @@ class DreamBoothDataset(Dataset):
                     self.prompts.append(f"a photo of a <{flowers[class_name]}>")
 
         self.num_images = len(self.image_paths)
+        self.replay_memory = replay_memory if replay_memory is not None else []
 
         self.image_transforms = transforms.Compose(
             [
@@ -228,18 +230,22 @@ class DreamBoothDataset(Dataset):
         )
 
     def __len__(self):
-        return self.num_images
+        return self.num_images++len(self.replay_memory)
 
     def __getitem__(self, index):
         example = {}
 
-        # Load image
-        image_path = self.image_paths[index]
-        image = Image.open(image_path)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-
-        prompt = self.prompts[index]
+        if index < self.num_images:
+            # Load data from the original dataset
+            image_path = self.image_paths[index]
+            image = Image.open(image_path)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            prompt = self.prompts[index]
+        else:
+            # Load data from the replay memory
+            replay_index = index - self.num_images
+            image, prompt = self.replay_memory[replay_index]
 
         example['instance_images'] = self.image_transforms(image)
         example['instance_prompt_ids'] = self.tokenizer(
@@ -250,46 +256,9 @@ class DreamBoothDataset(Dataset):
         ).input_ids
 
         return example
-class EWC:
-    def __init__(self, model, dataloader, importance=1000):
-        self.model = model
-        self.importance = importance
-        self.params = {n: p for n, p in model.named_parameters() if p.requires_grad}
-        self.means = {}
-        self.fisher = {}
-
-        # Compute Fisher Information Matrix and weight means
-        self._compute_fisher_and_means(dataloader)
-
-    def _compute_fisher_and_means(self, dataloader):
-        self.model.eval()
-        for n, p in self.params.items():
-            self.means[n] = p.clone().detach()
-
-        fisher_matrix = {n: torch.zeros_like(p) for n, p in self.params.items()}
-        for batch in dataloader:
-            inputs, latents = self.prepare_inputs(batch)
-            outputs = self.model(latents)
-            loss = outputs.mean()  # Example loss calculation, modify as needed
-            self.model.zero_grad()
-            loss.backward()
-            for n, p in fisher_matrix.items():
-                fisher_matrix[n] += (self.params[n].grad ** 2) / len(dataloader)
-        for n, p in fisher_matrix.items():
-            self.fisher[n] = p.clone().detach()
-
-    def penalty(self, model):
-        loss = 0
-        for n, p in model.named_parameters():
-            if n in self.fisher:
-                loss += (self.fisher[n] * (p - self.means[n]).pow(2)).sum()
-        return self.importance * loss
-
-    def prepare_inputs(self, batch):
-        # Custom method to extract and prepare inputs (images, captions, latents, etc.)
-        inputs = batch['pixel_values']  # Modify according to actual batch structure
-        latents = batch['pixel_values']
-        return inputs, latents
+    def update_replay_memory(self, new_data):
+        """Update the replay memory with new data."""
+        self.replay_memory.extend(new_data)
 
 class PromptDataset(Dataset):
     def __init__(self, prompt, num_samples):
@@ -682,8 +651,9 @@ def main():
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
     )
 
-    # config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config('/content/WSDD-Weight-Shared-Distilled-Diffusion-/src/unet_config/bk_tiny/bk_small')
+    config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
+    unet = UNet2DConditionModel.from_config(config_student, revision=args.non_ema_revision)
+    # unet = UNet2DConditionModel.from_config('/content/WSDD-Weight-Shared-Distilled-Diffusion-/src/unet_config/bk_tiny/bk_small')
 
     # Copy weights from teacher to student
     if args.use_copy_weight_from_teacher:
@@ -891,7 +861,6 @@ def main():
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
-    ewc = EWC(unet, train_dataloader, importance=1000)
     if args.use_ema:
         ema_unet.to(accelerator.device)
     
@@ -1041,7 +1010,6 @@ def main():
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
                 loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
-                ews_loss= ewc.penalty(unet)
                 # Predict feature-KD loss
                 losses_kd_feat = []
                 for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
@@ -1057,7 +1025,7 @@ def main():
 
                 # Compute the final loss
                 loss_stu=distillation_loss(model_pred.float(),model_pred_teacher.float(),target.float(),T,alpha)
-                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu+ews_loss
+                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu
                 
 
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -1080,6 +1048,8 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
+            new_replay_data = [(batch["pixel_values"][i], batch["input_ids"][i]) for i in range(len(batch["pixel_values"]))]
+            train_dataset.update_replay_memory(new_replay_data)  # Update the replay memory with current batch data
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
