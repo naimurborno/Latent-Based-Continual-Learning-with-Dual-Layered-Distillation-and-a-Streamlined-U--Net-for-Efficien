@@ -194,7 +194,6 @@ class DreamBoothDataset(Dataset):
         # class_data_root=None,
         # class_prompt=None,
         size=512,
-        replay_memory=None,
         center_crop=False,
     ):
         self.size = size
@@ -218,7 +217,6 @@ class DreamBoothDataset(Dataset):
                     self.prompts.append(f"a photo of a <{flowers[class_name]}>")
 
         self.num_images = len(self.image_paths)
-        self.replay_memory = replay_memory if replay_memory is not None else []
 
         self.image_transforms = transforms.Compose(
             [
@@ -230,22 +228,18 @@ class DreamBoothDataset(Dataset):
         )
 
     def __len__(self):
-        return self.num_images++len(self.replay_memory)
+        return self.num_images
 
     def __getitem__(self, index):
         example = {}
 
-        if index < self.num_images:
-            # Load data from the original dataset
-            image_path = self.image_paths[index]
-            image = Image.open(image_path)
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            prompt = self.prompts[index]
-        else:
-            # Load data from the replay memory
-            replay_index = index - self.num_images
-            image, prompt = self.replay_memory[replay_index]
+        # Load image
+        image_path = self.image_paths[index]
+        image = Image.open(image_path)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        prompt = self.prompts[index]
 
         example['instance_images'] = self.image_transforms(image)
         example['instance_prompt_ids'] = self.tokenizer(
@@ -256,9 +250,6 @@ class DreamBoothDataset(Dataset):
         ).input_ids
 
         return example
-    def update_replay_memory(self, new_data):
-        """Update the replay memory with new data."""
-        self.replay_memory.extend(new_data)
 
 class PromptDataset(Dataset):
     def __init__(self, prompt, num_samples):
@@ -652,8 +643,7 @@ def main():
     )
 
     config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config(config_student, revision=args.non_ema_revision)
-    # unet = UNet2DConditionModel.from_config('/content/WSDD-Weight-Shared-Distilled-Diffusion-/src/unet_config/bk_tiny/bk_small')
+    unet = UNet2DConditionModel.from_config('borno1/bksdm-epoch-28000', subfolder='unet')
 
     # Copy weights from teacher to student
     if args.use_copy_weight_from_teacher:
@@ -664,7 +654,6 @@ def main():
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet_teacher.requires_grad_(False)
-    
 
     # Create EMA for the unet.
     if args.use_ema:
@@ -842,7 +831,7 @@ def main():
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn
     )
-    
+
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -861,9 +850,10 @@ def main():
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
+
     if args.use_ema:
         ema_unet.to(accelerator.device)
-    
+
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -1010,6 +1000,7 @@ def main():
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
                 loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
+
                 # Predict feature-KD loss
                 losses_kd_feat = []
                 for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
@@ -1048,8 +1039,6 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-            new_replay_data = [(batch["pixel_values"][i], batch["input_ids"][i]) for i in range(len(batch["pixel_values"]))]
-            train_dataset.update_replay_memory(new_replay_data)  # Update the replay memory with current batch data
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
