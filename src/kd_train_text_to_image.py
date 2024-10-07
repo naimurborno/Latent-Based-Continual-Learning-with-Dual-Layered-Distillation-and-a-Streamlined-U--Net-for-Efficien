@@ -194,6 +194,7 @@ class DreamBoothDataset(Dataset):
         # class_data_root=None,
         # class_prompt=None,
         size=512,
+        replay_memory=None,
         center_crop=False,
     ):
         self.size = size
@@ -214,9 +215,10 @@ class DreamBoothDataset(Dataset):
                 class_name = class_folder.name
                 for image_file in class_folder.glob('*.jpg'):  # Adjust the extension as necessary
                     self.image_paths.append(image_file)
-                    self.prompts.append(f"a photo of a <{flowers[class_name]}>")
+                    self.prompts.append(f"{flowers[class_name]}")
 
         self.num_images = len(self.image_paths)
+        self.replay_memory = replay_memory if replay_memory is not None else []
 
         self.image_transforms = transforms.Compose(
             [
@@ -228,18 +230,22 @@ class DreamBoothDataset(Dataset):
         )
 
     def __len__(self):
-        return self.num_images
+        return self.num_images+len(self.replay_memory)
 
     def __getitem__(self, index):
         example = {}
 
-        # Load image
-        image_path = self.image_paths[index]
-        image = Image.open(image_path)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-
-        prompt = self.prompts[index]
+        if index < self.num_images:
+            # Load data from the original dataset
+            image_path = self.image_paths[index]
+            image = Image.open(image_path)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            prompt = self.prompts[index]
+        else:
+            # Load data from the replay memory
+            replay_index = index - self.num_images
+            image, prompt = self.replay_memory[replay_index]
 
         example['instance_images'] = self.image_transforms(image)
         example['instance_prompt_ids'] = self.tokenizer(
@@ -250,6 +256,28 @@ class DreamBoothDataset(Dataset):
         ).input_ids
 
         return example
+        # example = {}
+
+        # # Load image
+        # image_path = self.image_paths[index]
+        # image = Image.open(image_path)
+        # if image.mode != "RGB":
+        #     image = image.convert("RGB")
+
+        # prompt = self.prompts[index]
+
+        # example['instance_images'] = self.image_transforms(image)
+        # example['instance_prompt_ids'] = self.tokenizer(
+        #     prompt,
+        #     padding='do_not_pad',
+        #     truncation=True,
+        #     max_length=self.tokenizer.model_max_length
+        # ).input_ids
+
+        # return example
+    def update_replay_memory(self, new_data):
+        """Update the replay memory with new data."""
+        self.replay_memory.extend(new_data)
 
 class PromptDataset(Dataset):
     def __init__(self, prompt, num_samples):
@@ -450,7 +478,7 @@ def parse_args():
     )
     parser.add_argument(
         "--allow_tf32",
-        action="store_true",
+        action="store_false",
         help=(
             "Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
             " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
@@ -470,7 +498,7 @@ def parse_args():
     parser.add_argument(
         "--dataloader_num_workers",
         type=int,
-        default=0,
+        default=2,
         help=(
             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
         ),
@@ -953,6 +981,7 @@ def main():
     for epoch in range(first_epoch, args.num_train_epochs):
 
         unet.train()
+        unet_teacher.eval()
 
         train_loss = 0.0
         train_loss_sd = 0.0
@@ -998,8 +1027,9 @@ def main():
                 loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 # Predict output-KD loss
-                model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
-                loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
+                with torch.no_grad():
+                  model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
+                  loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
 
                 # Predict feature-KD loss
                 losses_kd_feat = []
@@ -1039,7 +1069,11 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-
+                new_replay_data = [(batch["pixel_values"][i], batch["input_ids"][i]) for i in range(1)]
+                train_dataset.update_replay_memory(new_replay_data)  # Update the replay memory with current batch data
+                del new_replay_data, batch
+            #     torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 if args.use_ema:
