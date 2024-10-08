@@ -45,6 +45,7 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
+import random
 
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
@@ -977,7 +978,8 @@ def main():
     wandb_tracker = accelerator.get_tracker("wandb")
     T = 2.0  # Temperature
     alpha = 1  # Weight for distillation loss
-
+    a=torch.tensor(0).to('cuda')
+    b=torch.tensor(0).to('cuda')
     for epoch in range(first_epoch, args.num_train_epochs):
 
         unet.train()
@@ -988,7 +990,11 @@ def main():
         train_loss_kd_output = 0.0
         train_loss_kd_feat = 0.0
 
+
         for step, batch in enumerate(train_dataloader):
+            if torch.all(a!=0):
+              batch['pixel_values']=torch.concat((batch['pixel_values'],torch.tensor(a).unsqueeze(0).to('cuda')),dim=0)
+              batch['input_ids']=torch.concat((batch['input_ids'],torch.tensor(b).unsqueeze(0).to('cuda').long()),dim=0)
             # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
@@ -1069,9 +1075,9 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-                new_replay_data = [(batch["pixel_values"][i], batch["input_ids"][i]) for i in range(1)]
-                train_dataset.update_replay_memory(new_replay_data)  # Update the replay memory with current batch data
-                del new_replay_data, batch
+                # new_replay_data = [(batch["pixel_values"][i], batch["input_ids"][i]) for i in range(1)]
+                # train_dataset.update_replay_memory(new_replay_data)  # Update the replay memory with current batch data
+                # del new_replay_data, batch
             #     torch.cuda.empty_cache()
             # torch.cuda.empty_cache()
             # Checks if the accelerator has performed an optimization step behind the scenes
@@ -1098,7 +1104,15 @@ def main():
                                             train_loss, train_loss_sd, train_loss_kd_output, train_loss_kd_feat,
                                             lr_scheduler.get_last_lr()[0],
                                             args.lambda_sd, args.lambda_kd_output, args.lambda_kd_feat])
-
+                tag=random.randint(0,len(batch["pixel_values"])-1)
+                if tag>1:
+                  a=batch['pixel_values'][tag]
+                  print(a.ndim)
+                  b=batch['input_ids'][tag]
+                else:
+                  a=batch['pixel_values'][0]
+                  b=batch['input_ids'][0]
+                
                 train_loss = 0.0
                 train_loss_sd = 0.0
                 train_loss_kd_output = 0.0
