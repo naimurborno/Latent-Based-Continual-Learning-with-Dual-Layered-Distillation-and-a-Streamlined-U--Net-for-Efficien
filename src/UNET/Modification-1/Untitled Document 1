@@ -1,0 +1,4 @@
+1.Removed The "Upblock2D" module.
+2.Removed The "DownBlock2D" module
+4.The mid Block only consist cross attention layer.
+3.Total Parameter 424519044
