@@ -671,8 +671,8 @@ def main():
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
     )
 
-    config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config('borno1/bksdm-epoch-28000', subfolder='unet')
+    #config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
+    unet = UNet2DConditionModel.from_config('/content/Proposed_Config.json')
 
     # Copy weights from teacher to student
     if args.use_copy_weight_from_teacher:
