@@ -1,5 +1,0 @@
-1.Layers(crossattention,crossattention,downblock,downblock)
-2.layers per block 2
-3.contains mid block
-4.total parameters 354629124
-
