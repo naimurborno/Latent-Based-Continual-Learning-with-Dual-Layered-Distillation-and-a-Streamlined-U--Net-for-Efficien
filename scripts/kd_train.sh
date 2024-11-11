@@ -8,7 +8,7 @@ TRAIN_DATA_DIR="./data/laion_aes/preprocessed_212k" # please adjust it if needed
 UNET_CONFIG_PATH="./src/unet_config"
 
 UNET_NAME="bk_small" # option: ["bk_base", "bk_small", "bk_tiny"]
-OUTPUT_DIR="./results/kd_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/WDCC" # please adjust it if needed
 
 BATCH_SIZE=1
 GRAD_ACCUMULATION=4
@@ -16,7 +16,7 @@ GRAD_ACCUMULATION=4
 StartTime=$(date +%s)
 
 CUDA_VISIBLE_DEVICES=0 accelerate launch src/kd_train_text_to_image.py \
-  --pretrained_model_name_or_path "CompVis/stable-diffusion-v1-4" \
+  --pretrained_model_name_or_path "borno1/for-teacher-model-realvisionv51-20000" \
   --train_data_dir $TRAIN_DATA_DIR\
   --use_ema \
   --resolution 512 --center_crop --random_flip \
