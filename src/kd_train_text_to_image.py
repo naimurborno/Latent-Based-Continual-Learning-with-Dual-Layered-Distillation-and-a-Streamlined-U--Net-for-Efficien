@@ -672,11 +672,11 @@ def main():
     )
 
     #config_student = UNet2DConditionModel.load_config(args.unet_config_path, subfolder=args.unet_config_name)
-    unet = UNet2DConditionModel.from_config('/content/Proposed_Config.json')
+    unet = UNet2DConditionModel.from_config('/content/Proposed_Config (1).json')
 
     # Copy weights from teacher to student
-    if args.use_copy_weight_from_teacher:
-        copy_weight_from_teacher(unet, unet_teacher, args.unet_config_name)
+    # if args.use_copy_weight_from_teacher:
+    #     copy_weight_from_teacher(unet, unet_teacher, args.unet_config_name)
    
 
     # Freeze student's vae and text_encoder and teacher's unet
@@ -1038,21 +1038,21 @@ def main():
                   loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
 
                 # Predict feature-KD loss
-                losses_kd_feat = []
-                for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
-                    a_tea = acts_tea[m_tea]
-                    a_stu = acts_stu[m_stu]
+                # losses_kd_feat = []
+                # for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
+                #     a_tea = acts_tea[m_tea]
+                #     a_stu = acts_stu[m_stu]
 
-                    if type(a_tea) is tuple: a_tea = a_tea[0]                        
-                    if type(a_stu) is tuple: a_stu = a_stu[0]
+                #     if type(a_tea) is tuple: a_tea = a_tea[0]                        
+                #     if type(a_stu) is tuple: a_stu = a_stu[0]
 
-                    tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
-                    losses_kd_feat.append(tmp)
-                loss_kd_feat = sum(losses_kd_feat)
+                #     tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
+                #     losses_kd_feat.append(tmp)
+                # loss_kd_feat = sum(losses_kd_feat)
 
                 # Compute the final loss
                 loss_stu=distillation_loss(model_pred.float(),model_pred_teacher.float(),target.float(),T,alpha)
-                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat+loss_stu
+                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output +loss_stu
                 
 
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -1065,8 +1065,8 @@ def main():
                 avg_loss_kd_output = accelerator.gather(loss_kd_output.repeat(args.train_batch_size)).mean()
                 train_loss_kd_output += avg_loss_kd_output.item() / args.gradient_accumulation_steps
 
-                avg_loss_kd_feat = accelerator.gather(loss_kd_feat.repeat(args.train_batch_size)).mean()
-                train_loss_kd_feat += avg_loss_kd_feat.item() / args.gradient_accumulation_steps
+                #avg_loss_kd_feat = accelerator.gather(loss_kd_feat.repeat(args.train_batch_size)).mean()
+                #train_loss_kd_feat += avg_loss_kd_feat.item() / args.gradient_accumulation_steps
 
                 # Backpropagate
                 accelerator.backward(loss)
@@ -1091,7 +1091,6 @@ def main():
                         "train_loss": train_loss, 
                         "train_loss_sd": train_loss_sd,
                         "train_loss_kd_output": train_loss_kd_output,
-                        "train_loss_kd_feat": train_loss_kd_feat,
                         "lr": lr_scheduler.get_last_lr()[0]
                     }, 
                     step=global_step
@@ -1127,7 +1126,6 @@ def main():
             logs = {"step_loss": loss.detach().item(),
                     "sd_loss": loss_sd.detach().item(),
                     "kd_output_loss": loss_kd_output.detach().item(),
-                    "kd_feat_loss": loss_kd_feat.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
 
