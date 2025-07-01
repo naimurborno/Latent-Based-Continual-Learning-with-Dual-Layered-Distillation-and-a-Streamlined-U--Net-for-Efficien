@@ -2,7 +2,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 
-A PyTorch-based framework for **Weight‑Shared Distilled Diffusion (WSDD)** — a compact, efficient diffusion model that reuses weights across timesteps, distilled for faster sampling without quality loss.
+A PyTorch-based framework for **Latent-Based Continual Learning with
+Dual-Layered Distillation and a Streamlined U- Net for Efficient Text-to-Image Generation** — a compact, efficient diffusion model that reuses weights across timesteps, distilled for faster sampling without quality loss.
 
 ---
 
