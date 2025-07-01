@@ -1,4 +1,4 @@
-# 📦 WSDD: Weight‑Shared Distilled Diffusion
+# 📦 Latent-Based Continual Learning with Dual-Layered Distillation and a Streamlined U- Net for Efficient Text-to-Image Generation
 
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 
